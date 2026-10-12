@@ -16,7 +16,6 @@ Run from the project root:  python scripts/extract_signals.py
 """
 
 import csv
-import os
 import re
 import sys
 import time
@@ -25,21 +24,18 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from google import genai
-from google.genai import errors, types
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from lib import gemini                                                     # noqa: E402
 from lib.db import get_client                                              # noqa: E402
 from lib.prompts import EXTRACTION_PROMPT, SIGNAL_TYPES, STRENGTH_RUBRIC   # noqa: E402
 
-# Free tier = ~20 requests/day PER MODEL. When one model's daily quota is used up,
-# move to the next. Each signal records the model that produced it (extracted_by).
-MODELS = [os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"), "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+# Free tier = ~20 requests/day PER MODEL: lib/gemini.py moves to the next model when one
+# runs out. Each signal records the model that produced it (extracted_by).
 PAUSE_BETWEEN_ARTICLES = 6        # seconds; keeps us well under free-tier requests/minute
-RETRY_WAITS = [10, 30, 60]        # seconds to wait after a 429 / 5xx before trying again
 DROP_LOG = ROOT / "data" / "dropped_signals.csv"
 EARLIEST_SIGNAL_DATE = "2026-06-01"   # a bit before the article window: articles can report slightly older events
 
@@ -125,56 +121,21 @@ def log_drop(row: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Gemini call with retries for free-tier rate limits
+# Gemini call: model fallback + retries live in lib/gemini.py (shared with the Ask box)
 # ---------------------------------------------------------------------------
-class DailyQuotaUsedUp(Exception):
-    pass
+def call_gemini(prompt: str) -> tuple[Extraction, str]:
+    resp, model = gemini.generate(prompt, schema=Extraction)
+    parsed = resp.parsed if isinstance(resp.parsed, Extraction) else Extraction.model_validate_json(resp.text)
+    return parsed, model
 
 
-def _is_daily_quota(e: errors.APIError) -> bool:
-    """A per-day limit says 'retry in 16h..'; a per-minute limit says 'retry in 30s'."""
-    return e.code == 429 and re.search(r"retry in \d+h", str(e)) is not None
-
-
-def _call_one_model(client: genai.Client, model: str, prompt: str) -> Extraction:
-    config = types.GenerateContentConfig(
-        response_mime_type="application/json",
-        response_schema=Extraction,
-        temperature=0,
-    )
-    for attempt, wait in enumerate([0] + RETRY_WAITS):
-        time.sleep(wait)
-        try:
-            resp = client.models.generate_content(model=model, contents=prompt, config=config)
-            return resp.parsed if isinstance(resp.parsed, Extraction) \
-                else Extraction.model_validate_json(resp.text)
-        except errors.APIError as e:
-            if _is_daily_quota(e):
-                raise DailyQuotaUsedUp(model) from e
-            retryable = e.code in (429, 500, 503)
-            if not retryable or attempt == len(RETRY_WAITS):
-                raise
-            print(f"    {model} {e.code}, retrying in {RETRY_WAITS[attempt]}s")
-
-
-def call_gemini(client: genai.Client, prompt: str) -> tuple[Extraction, str]:
-    """Try the current model; on a used-up daily quota, drop it and use the next one."""
-    while MODELS:
-        try:
-            return _call_one_model(client, MODELS[0], prompt), MODELS[0]
-        except DailyQuotaUsedUp:
-            print(f"    {MODELS[0]} daily quota used up, switching to next model")
-            MODELS.pop(0)
-    raise RuntimeError("all Gemini models have used up their daily free quota")
-
-
-def process_article(db, client, art: dict) -> tuple[int, int]:
+def process_article(db, art: dict) -> tuple[int, int]:
     company = art["gccs"]["name"]
     prompt = EXTRACTION_PROMPT.format(
         company=company, url=art["url"], published_at=art["published_at"] or "unknown",
         signal_types=SIGNAL_TYPES, rubric=STRENGTH_RUBRIC, content=art["content"],
     )
-    result, model = call_gemini(client, prompt)
+    result, model = call_gemini(prompt)
 
     # Point 5: no metadata date -> use the date Gemini read from the text.
     published = art["published_at"] or valid_date(result.article_date)
@@ -231,22 +192,21 @@ def process_article(db, client, art: dict) -> tuple[int, int]:
 
 def main() -> None:
     db = get_client(write=True)
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
     todo = (db.table("articles")
               .select("id,gcc_id,url,published_at,content,gccs(name)")
               .is_("processed_at", "null").order("id").execute().data)
-    print(f"Models (in order): {', '.join(MODELS)}. Articles to process: {len(todo)}\n")
+    print(f"Models (in order): {', '.join(gemini.models())}. Articles to process: {len(todo)}\n")
 
     kept_total = dropped_total = failed = 0
     for i, art in enumerate(todo, 1):
         name = art["gccs"]["name"]
         try:
-            kept, dropped = process_article(db, client, art)
+            kept, dropped = process_article(db, art)
             kept_total += kept
             dropped_total += dropped
             print(f"[{i:2}/{len(todo)}] {name:30} kept {kept}, dropped {dropped}")
-        except RuntimeError as e:          # every model's daily quota is gone: stop, retry tomorrow
+        except gemini.AllModelsExhausted as e:   # every model's daily quota is gone: stop, retry tomorrow
             print(f"\nStopping: {e}. {len(todo) - i + 1} articles left for the next run.")
             break
         except Exception as e:

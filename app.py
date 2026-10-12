@@ -9,6 +9,7 @@ Run:  streamlit run app.py
 """
 
 import html
+import re
 import os
 from collections import Counter
 from datetime import date, timedelta
@@ -18,12 +19,32 @@ import streamlit as st
 from dotenv import load_dotenv
 from supabase import create_client
 
-from lib.company_check import MEANING, direction, find_company, not_verified_note, people_lines
+from lib import gemini
+from lib.ask import ask
+from lib.company_check import (CLOSED_MEANING, MEANING, closed_on, direction, find_company,
+                               not_verified_note, parent_line,
+                               people_lines)
 from lib.events import TYPE_LABELS, TYPE_PRIORITY, group_events
 
 load_dotenv()
 
 st.set_page_config(page_title="GCC Signal Feed", page_icon="📡", layout="wide")
+
+
+def _secret(name: str) -> str | None:
+    """st.secrets on Streamlit Cloud, .env locally."""
+    try:
+        return st.secrets[name]
+    except Exception:
+        return os.environ.get(name)
+
+
+# The Ask box's helpers (lib/embed.py, lib/gemini.py) read keys from the environment.
+# On Streamlit Cloud the keys live in st.secrets, so copy just these over.
+# The Supabase service key is never used by the website.
+for _key in ("VOYAGE_API_KEY", "GEMINI_API_KEY", "GEMINI_MODEL"):
+    if not os.environ.get(_key) and _secret(_key):
+        os.environ[_key] = _secret(_key)
 
 NEW_DAYS = 7     # "New this week" = event started within 7 days of the LATEST signal in the data
                  # (not today), so the label still makes sense when the app is opened later
@@ -86,6 +107,18 @@ div[data-testid="stMetricValue"] {font-size: 1.6rem; font-weight: 650;}
 .tl-body {font-size: 0.94rem; color: #1C2430;}
 .tl-src {font-size: 0.8rem; color: #5B6472; margin-top: 0.15rem;}
 .disclaimer {color: #8A94A6; font-size: 0.8rem; margin-top: 1.4rem;}
+/* Ask */
+.answer {font-size: 1rem; line-height: 1.6; color: #1C2430;}
+.answer p {margin: 0 0 0.5rem 0;}
+.cite {display: inline-block; font-size: 0.72rem; font-weight: 700; color: #1F4E79;
+    background: #E6F1FB; border-radius: 4px; padding: 0 0.3rem; margin-left: 0.15rem;
+    text-decoration: none; vertical-align: 2px;}
+.notfound {font-size: 1rem; color: #5B6472;}
+.srclist {margin-top: 0.4rem;}
+.srcrow {font-size: 0.87rem; padding: 0.3rem 0; border-bottom: 1px solid #F0F2F5;}
+.srcrow .num {display: inline-block; width: 1.8rem; font-weight: 700; color: #1F4E79;}
+.srcrow.unused {color: #98A2B3;} .srcrow.unused .num {color: #98A2B3;}
+.srcrow.unused a {color: #98A2B3;}
 </style>
 """
 
@@ -93,14 +126,6 @@ div[data-testid="stMetricValue"] {font-size: 1.6rem; font-weight: 650;}
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
-def _secret(name: str) -> str | None:
-    """st.secrets on Streamlit Cloud, .env locally."""
-    try:
-        return st.secrets[name]
-    except Exception:
-        return os.environ.get(name)
-
-
 def _db():
     return create_client(_secret("SUPABASE_URL"), _secret("SUPABASE_ANON_KEY"))
 
@@ -294,14 +319,19 @@ DIRECTION_STYLE = {   # (text colour, background) for the plain-words direction
 def render_company(company: dict, events: list[dict]) -> None:
     trend = direction(events)
     fg, bg = DIRECTION_STYLE[trend]
-    meta = [m for m in (company["parent_company"] and f"Part of {company['parent_company']}",
+    meta = [m for m in (parent_line(company["name"], company["parent_company"]),
                         company["hq_country"] and f"HQ: {company['hq_country']}",
                         company["industry"],
                         company["india_cities"] and "India: " + ", ".join(company["india_cities"])) if m]
 
-    if company["is_verified_gcc"]:
-        link = (f' · <a href="{esc(company["verified_source"])}" target="_blank">source</a>'
-                if company["verified_source"] else "")
+    closed = closed_on(events)
+    link = (f' · <a href="{esc(company["verified_source"])}" target="_blank">source</a>'
+            if company["verified_source"] else "")
+    if closed:
+        status = "Was a GCC" if company["is_verified_gcc"] else "India centre"
+        gcc = (f'<div class="cc-status" style="color:#B42318">{status} · centre closed ({closed:%d %b %Y})</div>'
+               f'<div class="cc-note">Public news reports this India centre has been shut down{link}</div>')
+    elif company["is_verified_gcc"]:
         gcc = (f'<div class="cc-status" style="color:#1B7F3B">✓ Verified GCC</div>'
                f'<div class="cc-note">A public source describes it as a Global Capability Centre{link}</div>')
     else:
@@ -319,7 +349,7 @@ def render_company(company: dict, events: list[dict]) -> None:
     <div class="cc-note">{"<br>".join(esc(l) for l in people_lines(events)) or "No headcount numbers stated in the news."}</div>
   </div>
 </div>
-<div class="cc-meaning"><b>What this means for you:</b> {esc(MEANING[trend])}</div>
+<div class="cc-meaning"><b>What this means for you:</b> {esc(CLOSED_MEANING if closed else MEANING[trend])}</div>
 """, unsafe_allow_html=True)
 
     if events:
@@ -342,6 +372,11 @@ def job_seeker_view() -> None:
     names = [g["name"] for g in gccs]
     st.markdown("#### Company Check")
     st.caption("Got an offer or interview at a GCC? Check if it's a real GCC and whether it's growing or shrinking.")
+    signals = load_signals()
+    latest = max((date.fromisoformat(s["signal_date"]) for s in signals), default=None)
+    as_of = f"Data as of {latest:%d %b %Y} · " if latest else ""
+    st.markdown(f'<div class="coverage">{as_of}{len(names)} companies · public news only</div>',
+                unsafe_allow_html=True)
 
     query = st.selectbox("Company", names, index=None, accept_new_options=True,
                          placeholder="Type a company name, e.g. DoorDash",
@@ -353,12 +388,90 @@ def job_seeker_view() -> None:
                        "from public news.")
         else:
             company = next(g for g in gccs if g["name"] == name)
-            events = [e for e in group_events(load_signals()) if e["gcc_id"] == company["id"]]
+            events = [e for e in group_events(signals) if e["gcc_id"] == company["id"]]
             with st.container(border=True):
                 render_company(company, events)
 
     st.markdown('<div class="disclaimer">Based on public news only. Not career or financial advice.</div>',
                 unsafe_allow_html=True)
+
+
+CITE_RE = re.compile(r"\[(\d+)\]")
+
+EXAMPLE_QUESTIONS = [
+    "Which companies are hiring in Hyderabad?",
+    "Any layoffs in Bengaluru?",
+    "Which GCCs opened in Pune recently?",
+]
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def cached_answer(question: str) -> dict:
+    """Same question (after tidying) -> same answer, without spending free-tier quota.
+    Errors aren't cached, so a quota failure is retried next time."""
+    return ask(_db(), question)
+
+
+def _set_question(q: str) -> None:
+    st.session_state["ask_q"] = q
+    st.session_state["ask_go"] = True
+
+
+def render_answer(result: dict) -> None:
+    sources = {s["n"]: s for s in result["sources"]}
+    with st.container(border=True):
+        if result["found"]:
+            def cite(m):
+                s = sources[int(m.group(1))]
+                return f'<a class="cite" href="{esc(s["url"])}" target="_blank">{m.group(1)}</a>'
+            paras = "".join("<p>" + CITE_RE.sub(cite, esc(line)) + "</p>"
+                            for line in result["answer"].splitlines())
+            st.markdown(f'<div class="answer">{paras}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="notfound">{esc(result["answer"])} The articles below were the '
+                        "closest matches, but none answers this question.</div>", unsafe_allow_html=True)
+
+        if result["sources"]:
+            label = "Sources" if result["found"] else "Closest articles searched"
+            rows = []
+            for s in result["sources"]:
+                used = s["n"] in result["cited"]
+                when = f" · {date.fromisoformat(s['published_at']):%d %b %Y}" if s["published_at"] else ""
+                rows.append(f'<div class="srcrow{"" if used or not result["found"] else " unused"}">'
+                            f'<span class="num">[{s["n"]}]</span><b>{esc(s["publisher"] or "Source")}</b>{when} · '
+                            f'<a href="{esc(s["url"])}" target="_blank">{esc(s["title"])}</a>'
+                            f'{"" if used or not result["found"] else " · not cited"}</div>')
+            st.markdown(f'**{label}**<div class="srclist">{"".join(rows)}</div>', unsafe_allow_html=True)
+
+
+def ask_view() -> None:
+    st.markdown("#### Ask the news")
+    st.caption("Plain-English questions, answered only from our tracked public news, with sources. "
+               "If the news doesn't say, we say so.")
+
+    cols = st.columns(len(EXAMPLE_QUESTIONS))
+    for col, q in zip(cols, EXAMPLE_QUESTIONS):
+        col.button(q, on_click=_set_question, args=(q,), use_container_width=True)
+
+    with st.form("ask_form", border=False):
+        st.text_input("Question", key="ask_q", placeholder="e.g. Which companies opened new centres in Chennai?",
+                      label_visibility="collapsed")
+        submitted = st.form_submit_button("Ask", type="primary")
+
+    question = " ".join((st.session_state.get("ask_q") or "").split())
+    if (submitted or st.session_state.pop("ask_go", False)) and question:
+        try:
+            with st.spinner("Searching the news and writing an answer…"):
+                result = cached_answer(question.lower().rstrip("?") + "?")
+            render_answer(result)
+        except gemini.GeminiUnavailable:
+            st.info("The AI has used up today's free quota. Please try again later. "
+                    "The Sales view and Company Check still work.")
+        except Exception:
+            st.warning("Sorry, something went wrong while answering. Please try again in a minute.")
+
+    st.markdown('<div class="disclaimer">Answers are AI-written from public news articles and checked for '
+                "citations. Always open the source to confirm.</div>", unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
@@ -369,10 +482,12 @@ st.title("GCC Signal Feed")
 st.markdown('<div class="tagline">Every signal is AI-extracted from public news and verified '
             "against its source.</div>", unsafe_allow_html=True)
 
-view = st.segmented_control("View", ["Sales view", "Job seeker view"], default="Sales view",
+view = st.segmented_control("View", ["Sales view", "Job seeker view", "Ask"], default="Sales view",
                             label_visibility="collapsed")
 
 if view == "Job seeker view":
     job_seeker_view()
+elif view == "Ask":
+    ask_view()
 else:
     sales_view()
