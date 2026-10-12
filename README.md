@@ -8,13 +8,14 @@ Built as a prototype for Flexiple's GCC sales team, with a lighter view for job 
 
 **Live app:** _link added after deployment_
 
-## The three views
+## The four views
 
 | View | For | What it shows |
 |---|---|---|
 | **Sales view** (default) | Flexiple's GCC sales team | Every event as a card: type badges, city, date, strength (1–5 dots), summary, a suggested next action, and every source with its evidence quote. Filters (city, type, growing/shrinking, strength, dates), "New this week" labels, and a CSV download. |
 | **Job seeker view** (Company Check) | Someone with an offer or interview at a GCC | One company at a time: is it a verified GCC (with source), is it growing or shrinking in plain words, stated headcounts, a news timeline, and what that means for their interview. Deliberately shows less: no scores, no sales actions, no full feed, no export. |
 | **Ask** | Anyone | A plain-English question ("Any layoffs in Bengaluru?") answered only from the tracked articles, with numbered citations. If the news doesn't say, it answers "Not found in our tracked news." |
+| **Providers** | Flexiple strategy / partnerships | Which service providers (ANSR, HCLTech, Accenture…) the news names as setup or hiring partners for a GCC, each with the exact sentence as proof. Found by fixed rules, no AI: one sentence must name the provider, a tracked GCC and a partnership word ([lib/providers.py](lib/providers.py)). |
 
 ## Architecture
 
