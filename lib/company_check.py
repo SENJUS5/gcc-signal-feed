@@ -5,6 +5,8 @@ Deliberately shows LESS than the sales view: a direction in plain words, no stre
 scores, no sales actions, no full feed. All rules here are fixed, no AI.
 """
 
+from lib.events import headcount_text
+
 # What our sources call the centre, for companies NOT verified as a GCC.
 # Taken from the wording of the saved articles (see data/article_urls.csv).
 SOURCE_WORDING = {
@@ -47,9 +49,9 @@ def people_lines(events: list[dict]) -> list[str]:
     grow = [e["headcount"] for e in events if e["headcount"] and e["direction"] == "growing"]
     cut = [e["headcount"] for e in events if e["headcount"] and e["direction"] == "shrinking"]
     if grow:
-        lines.append(f"Plans to grow to about {max(grow):,} people (as stated in the news)")
+        lines.append(headcount_text(max(grow), "growing"))
     if cut:
-        lines.append(f"Job cuts reported: about {max(cut):,} people")
+        lines.append(headcount_text(max(cut), "shrinking"))
     return lines
 
 

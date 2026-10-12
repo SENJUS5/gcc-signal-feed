@@ -158,10 +158,10 @@ def render_card(ev: dict) -> None:
     with st.container(border=True):
         badges = "".join(badge(t) for t in ev["types"])
         new_tag = '<span class="new">New this week</span>' if ev["is_new"] else ""
-        details = [esc(ev["city"]) if ev["city"] else "City not stated", f"{ev['date']:%d %b %Y}"]
-        if ev["headcount"]:
-            noun = "jobs affected" if ev["direction"] == "shrinking" else "people planned"
-            details.append(f"{ev['headcount']:,} {noun}")
+        details = [esc(", ".join(ev["cities"])) if ev["cities"] else "City not stated",
+                   f"{ev['date']:%d %b %Y}"]
+        if ev["headcount_text"]:
+            details.append(esc(ev["headcount_text"]))
         st.markdown(f"""
 <div class="card-head">
   <div>
@@ -191,11 +191,11 @@ def events_csv(events: list[dict]) -> bytes:
         "company": e["company"],
         "signal_types": "; ".join(TYPE_LABELS[t] for t in e["types"]),
         "direction": e["direction"],
-        "city": e["city"] or "",
+        "cities": ", ".join(e["cities"]),
         "date": e["date"].isoformat(),
         "new_this_week": "yes" if e["is_new"] else "",
         "strength": e["strength"],
-        "headcount": e["headcount"] or "",
+        "headcount": e["headcount_text"] or "",
         "summary": e["summary"],
         "suggested_next_action": e["next_action"],
         "source_count": len(e["sources"]),
@@ -210,7 +210,7 @@ def events_csv(events: list[dict]) -> bytes:
 def sidebar_filters(events: list[dict], first: date, last: date) -> tuple[list[dict], bool]:
     """Returns (filtered events, whether any filter is narrowing the list)."""
     st.sidebar.header("Filters")
-    cities = sorted({e["city"] for e in events if e["city"]})
+    cities = sorted({c for e in events for c in e["cities"]})
     city_sel = st.sidebar.multiselect("City", cities, placeholder="All cities")
     type_sel = st.sidebar.multiselect("Signal type", TYPE_PRIORITY, format_func=TYPE_LABELS.get,
                                       placeholder="All types")
@@ -227,7 +227,7 @@ def sidebar_filters(events: list[dict], first: date, last: date) -> tuple[list[d
     active = bool(city_sel or type_sel or direction != "All" or min_strength > 1
                   or (start, end) != (first, last))
     shown = [e for e in events
-             if (not city_sel or e["city"] in city_sel)
+             if (not city_sel or set(city_sel) & set(e["cities"]))
              and (not type_sel or set(type_sel) & set(e["types"]))
              and (direction == "All" or e["direction"] == direction.lower())
              and e["strength"] >= min_strength
@@ -236,7 +236,7 @@ def sidebar_filters(events: list[dict], first: date, last: date) -> tuple[list[d
 
 
 def summary_row(events: list[dict]) -> None:
-    cities = Counter(e["city"] for e in events if e["city"])
+    cities = Counter(c for e in events for c in e["cities"])
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Events", len(events))
     c2.metric("New centres", sum("new_centre" in e["types"] for e in events))

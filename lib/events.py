@@ -8,11 +8,12 @@ Measured from the first date, so a long chain of reports can't merge two separat
 events a month apart.
 
 An event shows: all its signal types as badges (most important first), the earliest
-date, the highest strength, the summary of its most important signal, the largest
-stated headcount, the next action of its most important type, and every distinct
+date, the highest strength, the summary of its most important signal, every city
+mentioned, the largest stated headcount, the next action of its most important type, and every distinct
 source with its evidence quote.
 """
 
+import re
 from collections import Counter
 from datetime import date
 
@@ -40,6 +41,37 @@ NEXT_ACTION = {
 }
 
 SHRINKING = {"layoff", "closure"}
+
+# Indian GCC cities we look for in summaries, with spelling variants -> one name.
+CITY_NAMES = {
+    "bengaluru": "Bengaluru", "bangalore": "Bengaluru", "hyderabad": "Hyderabad",
+    "chennai": "Chennai", "pune": "Pune", "mumbai": "Mumbai", "delhi": "Delhi",
+    "gurugram": "Gurugram", "gurgaon": "Gurugram", "noida": "Noida", "kolkata": "Kolkata",
+    "coimbatore": "Coimbatore", "kochi": "Kochi", "ahmedabad": "Ahmedabad", "jaipur": "Jaipur",
+    "visakhapatnam": "Visakhapatnam", "indore": "Indore", "chandigarh": "Chandigarh",
+    "mysuru": "Mysuru", "bhubaneswar": "Bhubaneswar", "thiruvananthapuram": "Thiruvananthapuram",
+}
+_CITY_RE = re.compile(r"\b(" + "|".join(CITY_NAMES) + r")\b", re.I)
+
+
+def event_cities(sigs: list[dict]) -> list[str]:
+    """Every city named by the signals or mentioned in their summaries.
+    Most-cited signal city first, then the rest in the order they appear."""
+    cited = Counter(s["city"] for s in sigs if s["city"])
+    found = [c for c, _ in cited.most_common()]
+    for s in sigs:
+        for m in _CITY_RE.findall(s["summary"] or ""):
+            name = CITY_NAMES[m.lower()]
+            if name not in found:
+                found.append(name)
+    return found
+
+
+def headcount_text(headcount: int | None, direction: str) -> str | None:
+    """Neutral wording: we don't know if a number is a plan or current size, so don't guess."""
+    if not headcount:
+        return None
+    return f"{headcount:,} jobs affected" if direction == "shrinking" else f"{headcount:,} people (stated)"
 
 
 def group_events(signals: list[dict]) -> list[dict]:
@@ -70,7 +102,6 @@ def _summarise(g: dict) -> dict:
     # Headcount: largest stated number on the same side (don't mix hires with layoffs).
     same_side = [s["headcount"] for s in sigs
                  if s["headcount"] and (s["signal_type"] in SHRINKING) == (direction == "shrinking")]
-    cities = Counter(s["city"] for s in sigs if s["city"])
 
     sources, seen = [], set()
     for s in sorted(sigs, key=lambda s: (s["signal_date"], TYPE_PRIORITY.index(s["signal_type"]))):
@@ -86,12 +117,13 @@ def _summarise(g: dict) -> dict:
         "types": types,
         "main_type": main,
         "direction": direction,
-        "city": cities.most_common(1)[0][0] if cities else None,
+        "cities": event_cities(sigs),
         "date": g["first_date"],
         "last_date": max(date.fromisoformat(s["signal_date"]) for s in sigs),
         "strength": max(s["strength"] for s in sigs),
         "summary": best["summary"],
         "headcount": max(same_side) if same_side else None,
+        "headcount_text": headcount_text(max(same_side) if same_side else None, direction),
         "next_action": NEXT_ACTION[main],
         "signal_count": len(sigs),
         "sources": sources,
