@@ -6,7 +6,9 @@ news by AI, **checked against its source in code**, and linked to the article it
 
 Built as a prototype for Flexiple's GCC sales team, with a lighter view for job seekers.
 
-**Live app:** _link added after deployment_
+**Live app:** https://gcc-signal-feed.streamlit.app/
+
+**Code:** https://github.com/SENJUS5/gcc-signal-feed
 
 ## The four views
 
