@@ -1,0 +1,22 @@
+name,parent_company,hq_country,industry,india_cities,website,is_verified_gcc,verified_source
+thyssenkrupp Automotive Technology,thyssenkrupp,Germany,Automotive,Pune,https://www.thyssenkrupp-automotive-technology.com,true,https://www.tribuneindia.com/news/advanced-chassis/thyssenkrupp-automotive-technology-inaugurates-new-global-capability-center-in-pune
+Autodesk,Autodesk,USA,Software,Pune;Bengaluru,https://www.autodesk.com,true,https://gcc.economictimes.indiatimes.com/news/workplace-transformation/autodesk-expands-gcc-in-pune-deepens-india-engineering-footprint/134737997
+Kuehne+Nagel,Kuehne+Nagel,Switzerland,Logistics,Chennai,https://www.kuehne-nagel.com,false,
+DoorDash,DoorDash,USA,Internet / Delivery,Hyderabad;Pune,https://www.doordash.com,false,
+Target in India,Target,USA,Retail,Bengaluru,https://corporate.target.com,true,https://yourstory.com/enterprise-story/2026/08/target-in-india-global-capability-hub
+Imagine Learning,Imagine Learning,USA,EdTech,Bengaluru,https://www.imaginelearning.com,false,
+Mythic AI,Mythic,USA,Semiconductors,Bengaluru,https://mythic.ai,false,
+Abercrombie & Fitch,Abercrombie & Fitch Co.,USA,Retail,Bengaluru,https://corporate.abercrombie.com,true,https://m.thewire.in/article/ptiprnews/abercrombie-fitch-co-opens-global-capability-center-in-bengaluru-to-support-continued-global-growth-and-strengthen-enterprise-capabilities
+JLL Business Services,JLL,USA,Real Estate Services,Hyderabad;Gurugram,https://www.jll.com,true,https://www.jll.com/en-in/newsroom/jll-inaugrates-120000-sq-ft-gcc-in-hyderabad
+Milacron,Milacron,USA,Industrial Machinery,Coimbatore,https://www.milacron.com,true,https://www.milacron.com/news/milacron-inaugurates-its-first-global-capability-center-in-coimbatore-india/
+Chubb,Chubb,Switzerland,Insurance,Chennai;Hyderabad;Bengaluru,https://www.chubb.com,true,https://ssfglobal.in/industry_action/chubb-launches-first-chennai-gcc-to-expand-global-analytics-and-engineering-capabilities/
+Nordex,Nordex SE,Germany,Renewable Energy,Chennai,https://www.nordex-online.com,true,https://ssfglobal.in/industry_action/nordex-expands-chennai-gcc-with-new-engineering-rd-centre/
+TIAA Global Capabilities,TIAA,USA,Financial Services,Pune,https://www.tiaa.org,true,https://www.constructionworld.in/policy-updates-and-economic-news/tiaa-global-capabilities-leases-255713-square-feet-in-pune/96764
+Danaher (DHR Holding India),Danaher,USA,Life Sciences,Bengaluru,https://www.danaher.com,true,https://biospectrumindia.com/news/102/28472/danaher-expands-global-capability-and-rd-presence-in-bengaluru.html
+Billtrust,Billtrust,USA,Fintech,Hyderabad,https://www.billtrust.com,true,https://www.thenewstrust.in/billtrust-inaugurates-hyderabad-gcc-plans-rs-450-crore-investment/
+WACKER,Wacker Chemie AG,Germany,Chemicals,Pune,https://www.wacker.com,true,https://www.hcltech.com/en-us/press-releases/wacker-establishes-global-capability-center-india-hcltech
+Litmos,Litmos,USA,Software,Pune,https://www.litmos.com,false,
+Cambium Networks,Cambium Networks,USA,Telecom Equipment,Bengaluru,https://www.cambiumnetworks.com,true,https://lapaasvoice.com/cambium-networks-shuts-bengaluru-gcc-cuts-around-200-jobs/
+PayPal,PayPal,USA,Fintech,Chennai;Bengaluru;Hyderabad,https://www.paypal.com,true,https://www.peoplematters.in/news/strategic-hr/india-gcc-layoffs-estimates-range-from-5000-to-30000-as-ai-changes-hiring-priorities-52387
+Visa,Visa,USA,Payments,Bengaluru;Mumbai;Chennai;Hyderabad,https://www.visa.com,true,https://www.peoplematters.in/news/strategic-hr/india-gcc-layoffs-estimates-range-from-5000-to-30000-as-ai-changes-hiring-priorities-52387
+ServiceNow,ServiceNow,USA,Software,Hyderabad;Bengaluru;Mumbai;Gurugram,https://www.servicenow.com,true,https://www.peoplematters.in/news/strategic-hr/india-gcc-layoffs-estimates-range-from-5000-to-30000-as-ai-changes-hiring-priorities-52387
