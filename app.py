@@ -25,6 +25,7 @@ from lib.company_check import (CLOSED_MEANING, MEANING, closed_on, direction, fi
                                not_verified_note, parent_line,
                                people_lines)
 from lib.events import TYPE_LABELS, TYPE_PRIORITY, group_events
+from lib.providers import PROVIDERS, find_providers
 
 load_dotenv()
 
@@ -107,6 +108,12 @@ div[data-testid="stMetricValue"] {font-size: 1.6rem; font-weight: 650;}
 .tl-body {font-size: 0.94rem; color: #1C2430;}
 .tl-src {font-size: 0.8rem; color: #5B6472; margin-top: 0.15rem;}
 .disclaimer {color: #8A94A6; font-size: 0.8rem; margin-top: 1.4rem;}
+/* Providers */
+.pv-name {font-size: 1.12rem; font-weight: 650; color: #1C2430;}
+.pv-kind {display: inline-block; background: #F2F4F7; color: #344054; font-size: 0.72rem;
+    font-weight: 600; padding: 0.1rem 0.5rem; border-radius: 999px; margin-left: 0.5rem; vertical-align: 2px;}
+.pv-with {color: #5B6472; font-size: 0.88rem; margin: 0.25rem 0 0.6rem 0;}
+.pv-company {font-weight: 600; font-size: 0.9rem; color: #1C2430; margin-top: 0.3rem;}
 /* Ask */
 .answer {font-size: 1rem; line-height: 1.6; color: #1C2430;}
 .answer ul {margin: 0; padding-left: 1.2rem;} .answer li {margin-bottom: 0.4rem;}
@@ -150,6 +157,12 @@ def load_gccs() -> list[dict]:
     return (_db().table("gccs")
               .select("id,name,parent_company,hq_country,industry,india_cities,is_verified_gcc,verified_source")
               .order("name").execute().data)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_articles() -> list[dict]:
+    return (_db().table("articles")
+              .select("gcc_id,url,title,publisher,published_at,content").execute().data)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -478,6 +491,40 @@ def ask_view() -> None:
                 "citations. Always open the source to confirm.</div>", unsafe_allow_html=True)
 
 
+def providers_view() -> None:
+    """Rule-based (no AI): providers named as setup or hiring partners, with the proving sentence."""
+    st.markdown("#### Who actually delivers")
+    st.markdown('<div class="tagline">Who actually delivers: providers named in public GCC news, with proof.</div>',
+                unsafe_allow_html=True)
+    articles = load_articles()
+    gccs = {g["id"]: g["name"] for g in load_gccs()}
+    found = find_providers(articles, gccs)
+
+    for p in found:
+        with st.container(border=True):
+            companies = ", ".join(l["company"] for l in p["links"])
+            blocks = []
+            for l in p["links"]:
+                src = l["source"]
+                when = f" · {date.fromisoformat(src['published_at']):%d %b %Y}" if src["published_at"] else ""
+                more = f" · +{len(l['sources']) - 1} more" if len(l["sources"]) > 1 else ""
+                blocks.append(
+                    f'<div class="pv-company">{esc(l["company"])}</div>'
+                    f'<div class="quote">“{esc(l["evidence"])}”</div>'
+                    f'<div class="src" style="margin:-0.5rem 0 0.6rem 0"><a href="{esc(src["url"])}" target="_blank">'
+                    f'{esc(src["publisher"] or "Source")}</a>{when}{more}</div>')
+            st.markdown(f'<div class="pv-name">{esc(p["provider"])}<span class="pv-kind">{esc(p["kind"])}</span></div>'
+                        f'<div class="pv-with">Worked with: {esc(companies)}</div>{"".join(blocks)}',
+                        unsafe_allow_html=True)
+
+    missing = [name for name in PROVIDERS if name not in {p["provider"] for p in found}]
+    if missing:
+        st.caption("Also searched for, but not named as a partner in our articles: " + ", ".join(missing) + ".")
+    st.markdown(f'<div class="disclaimer">Based on {len(articles)} articles; a provider not listed may simply '
+                "not be in our news yet. Found by fixed rules (no AI): a sentence must name the provider, a "
+                "tracked GCC and a partnership word.</div>", unsafe_allow_html=True)
+
+
 # ---------------------------------------------------------------------------
 # Page
 # ---------------------------------------------------------------------------
@@ -486,12 +533,15 @@ st.title("GCC Signal Feed")
 st.markdown('<div class="tagline">Every signal is AI-extracted from public news and verified '
             "against its source.</div>", unsafe_allow_html=True)
 
-view = st.segmented_control("View", ["Sales view", "Job seeker view", "Ask"], default="Sales view",
+view = st.segmented_control("View", ["Sales view", "Job seeker view", "Ask", "Providers"],
+                            default="Sales view",
                             label_visibility="collapsed")
 
 if view == "Job seeker view":
     job_seeker_view()
 elif view == "Ask":
     ask_view()
+elif view == "Providers":
+    providers_view()
 else:
     sales_view()
