@@ -1,3 +1,5 @@
 signal_id,company,signal_type,old,new,rule
 41,Billtrust,expansion,5,4,lease/expansion without headcount
 52,PayPal,layoff,5,4,layoff under 500 / no headcount
+55,ServiceNow,layoff,4,3,"global news, no India number"
+53,Visa,layoff,4,3,"global news, no India number"

@@ -18,13 +18,15 @@ import streamlit as st
 from dotenv import load_dotenv
 from supabase import create_client
 
+from lib.company_check import MEANING, direction, find_company, not_verified_note, people_lines
 from lib.events import TYPE_LABELS, TYPE_PRIORITY, group_events
 
 load_dotenv()
 
 st.set_page_config(page_title="GCC Signal Feed", page_icon="📡", layout="wide")
 
-NEW_DAYS = 7     # "New this week" = event started within this many days of today
+NEW_DAYS = 7     # "New this week" = event started within 7 days of the LATEST signal in the data
+                 # (not today), so the label still makes sense when the app is opened later
 
 # Badge colours per signal type: cool = growing, warm = shrinking.
 BADGE = {
@@ -66,6 +68,24 @@ div[data-testid="stMetricValue"] {font-size: 1.6rem; font-weight: 650;}
 .quote {border-left: 3px solid #D0D5DD; padding-left: 0.7rem; color: #344054;
     font-style: italic; margin: 0.2rem 0 0.8rem 0; font-size: 0.9rem;}
 .src {font-size: 0.86rem;}
+/* Company Check (job seeker view) */
+.cc-name {font-size: 1.5rem; font-weight: 700; color: #1C2430; letter-spacing: -0.01em;}
+.cc-meta {color: #5B6472; font-size: 0.92rem; margin: 0.2rem 0 0.9rem 0;}
+.cc-row {display: flex; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 0.9rem;}
+.cc-box {flex: 1 1 260px; border: 1px solid #E4E7EC; border-radius: 10px; padding: 0.75rem 0.9rem;
+    background: #FFFFFF;}
+.cc-label {color: #8A94A6; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; margin-bottom: 0.3rem;}
+.cc-status {font-size: 1.05rem; font-weight: 650;}
+.cc-note {color: #5B6472; font-size: 0.85rem; margin-top: 0.25rem;}
+.cc-meaning {background: #F2F6FB; border-left: 4px solid #1F4E79; border-radius: 6px;
+    padding: 0.65rem 0.9rem; font-size: 0.95rem; color: #1C2430; margin-bottom: 0.9rem;}
+.tl-item {display: flex; gap: 0.9rem; padding: 0.55rem 0; border-bottom: 1px solid #F0F2F5;}
+.tl-date {flex: 0 0 92px; color: #5B6472; font-size: 0.85rem; padding-top: 0.1rem;}
+.tl-dot {flex: 0 0 10px; height: 10px; border-radius: 50%; margin-top: 0.38rem;}
+.tl-body {font-size: 0.94rem; color: #1C2430;}
+.tl-src {font-size: 0.8rem; color: #5B6472; margin-top: 0.15rem;}
+.disclaimer {color: #8A94A6; font-size: 0.8rem; margin-top: 1.4rem;}
 </style>
 """
 
@@ -101,6 +121,13 @@ def load_signals() -> list[dict]:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
+def load_gccs() -> list[dict]:
+    return (_db().table("gccs")
+              .select("id,name,parent_company,hq_country,industry,india_cities,is_verified_gcc,verified_source")
+              .order("name").execute().data)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
 def load_coverage() -> dict:
     db = _db()
     return {
@@ -127,14 +154,10 @@ def dots(n: int) -> str:
             + '<span class="off">●</span>' * (5 - n) + "</span>")
 
 
-def is_new(ev: dict) -> bool:
-    return ev["date"] >= date.today() - timedelta(days=NEW_DAYS)
-
-
 def render_card(ev: dict) -> None:
     with st.container(border=True):
         badges = "".join(badge(t) for t in ev["types"])
-        new_tag = '<span class="new">New this week</span>' if is_new(ev) else ""
+        new_tag = '<span class="new">New this week</span>' if ev["is_new"] else ""
         details = [esc(ev["city"]) if ev["city"] else "City not stated", f"{ev['date']:%d %b %Y}"]
         if ev["headcount"]:
             noun = "jobs affected" if ev["direction"] == "shrinking" else "people planned"
@@ -170,7 +193,7 @@ def events_csv(events: list[dict]) -> bytes:
         "direction": e["direction"],
         "city": e["city"] or "",
         "date": e["date"].isoformat(),
-        "new_this_week": "yes" if is_new(e) else "",
+        "new_this_week": "yes" if e["is_new"] else "",
         "strength": e["strength"],
         "headcount": e["headcount"] or "",
         "summary": e["summary"],
@@ -229,6 +252,8 @@ def sales_view() -> None:
     events = group_events(signals)
     dates = [date.fromisoformat(s["signal_date"]) for s in signals]
     first, last = min(dates), max(dates)
+    for ev in events:
+        ev["is_new"] = ev["date"] >= last - timedelta(days=NEW_DAYS)
     shown, active = sidebar_filters(events, first, last)
 
     summary_row(shown)
@@ -258,8 +283,82 @@ def sales_view() -> None:
         render_card(ev)
 
 
+DIRECTION_STYLE = {   # (text colour, background) for the plain-words direction
+    "Growing": ("#1B7F3B", "#E7F6EC"),
+    "Shrinking": ("#B42318", "#FDE8E8"),
+    "Mixed": ("#B45309", "#FDF1E4"),
+    "No recent news": ("#5B6472", "#F2F4F7"),
+}
+
+
+def render_company(company: dict, events: list[dict]) -> None:
+    trend = direction(events)
+    fg, bg = DIRECTION_STYLE[trend]
+    meta = [m for m in (company["parent_company"] and f"Part of {company['parent_company']}",
+                        company["hq_country"] and f"HQ: {company['hq_country']}",
+                        company["industry"],
+                        company["india_cities"] and "India: " + ", ".join(company["india_cities"])) if m]
+
+    if company["is_verified_gcc"]:
+        link = (f' · <a href="{esc(company["verified_source"])}" target="_blank">source</a>'
+                if company["verified_source"] else "")
+        gcc = (f'<div class="cc-status" style="color:#1B7F3B">✓ Verified GCC</div>'
+               f'<div class="cc-note">A public source describes it as a Global Capability Centre{link}</div>')
+    else:
+        gcc = (f'<div class="cc-status" style="color:#5B6472">Not verified as a GCC</div>'
+               f'<div class="cc-note">{esc(not_verified_note(company["name"]))}</div>')
+
+    st.markdown(f"""
+<div class="cc-name">{esc(company["name"])}</div>
+<div class="cc-meta">{" · ".join(esc(m) for m in meta)}</div>
+<div class="cc-row">
+  <div class="cc-box"><div class="cc-label">Is it a real GCC?</div>{gcc}</div>
+  <div class="cc-box" style="background:{bg};border-color:{bg}">
+    <div class="cc-label">Direction (last 90 days)</div>
+    <div class="cc-status" style="color:{fg}">{trend}</div>
+    <div class="cc-note">{"<br>".join(esc(l) for l in people_lines(events)) or "No headcount numbers stated in the news."}</div>
+  </div>
+</div>
+<div class="cc-meaning"><b>What this means for you:</b> {esc(MEANING[trend])}</div>
+""", unsafe_allow_html=True)
+
+    if events:
+        st.markdown("**Recent news**")
+        items = []
+        for ev in sorted(events, key=lambda e: e["date"], reverse=True):
+            dot = DIRECTION_STYLE["Shrinking" if ev["direction"] == "shrinking" else "Growing"][0]
+            links = " · ".join(f'<a href="{esc(s["url"])}" target="_blank">{esc(s["publisher"] or "source")}</a>'
+                               for s in ev["sources"])
+            items.append(f'<div class="tl-item"><div class="tl-date">{ev["date"]:%d %b %Y}</div>'
+                         f'<div class="tl-dot" style="background:{dot}"></div>'
+                         f'<div><div class="tl-body">{esc(ev["summary"])}</div>'
+                         f'<div class="tl-src">Source: {links}</div></div></div>')
+        st.markdown("".join(items), unsafe_allow_html=True)
+
+
 def job_seeker_view() -> None:
-    st.info("Company Check for job seekers is coming in Step 5.")
+    """Company Check: one company at a time. No scores, no sales actions, no full feed."""
+    gccs = load_gccs()
+    names = [g["name"] for g in gccs]
+    st.markdown("#### Company Check")
+    st.caption("Got an offer or interview at a GCC? Check if it's a real GCC and whether it's growing or shrinking.")
+
+    query = st.selectbox("Company", names, index=None, accept_new_options=True,
+                         placeholder="Type a company name, e.g. DoorDash",
+                         label_visibility="collapsed")
+    if query:
+        name = find_company(query, names)
+        if name is None:
+            st.warning(f"We don't track this company yet. We currently cover {len(names)} companies "
+                       "from public news.")
+        else:
+            company = next(g for g in gccs if g["name"] == name)
+            events = [e for e in group_events(load_signals()) if e["gcc_id"] == company["id"]]
+            with st.container(border=True):
+                render_company(company, events)
+
+    st.markdown('<div class="disclaimer">Based on public news only. Not career or financial advice.</div>',
+                unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------

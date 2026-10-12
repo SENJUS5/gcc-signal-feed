@@ -11,6 +11,8 @@ Caps (the lowest matching cap wins):
      (evidence says "sources", "people familiar", "reported", ...)
   3. evidence mentions social media posts or unverified claims   -> max 2
   4. office_lease or expansion with no headcount                 -> max 4
+  5. evidence talks about global cuts/workforce and gives no     -> max 3
+     India-specific number (headcount is empty)
 
 Run from the project root:  python scripts/rescore.py
 """
@@ -29,6 +31,7 @@ from lib.db import get_client   # noqa: E402
 LOG = ROOT / "data" / "rescore_log.csv"
 
 NOT_CONFIRMED = re.compile(r"\bsources?\b|people familiar|\breported\b|social media|\bclaimed\b", re.I)
+GLOBAL_ONLY = re.compile(r"\bglobally\b|global workforce|global restructuring", re.I)
 UNVERIFIED = re.compile(r"social media|\bunverified\b|\bclaim(s|ed)?\b|\brumou?rs?\b|reddit", re.I)
 
 
@@ -44,6 +47,8 @@ def cap_for(s: dict) -> tuple[int, list[str]]:
         caps.append((2, "social media / unverified claim"))
     if t in ("office_lease", "expansion") and hc is None:
         caps.append((4, "lease/expansion without headcount"))
+    if GLOBAL_ONLY.search(ev) and hc is None:
+        caps.append((3, "global news, no India number"))
     if not caps:
         return 5, []
     lowest = min(c for c, _ in caps)
