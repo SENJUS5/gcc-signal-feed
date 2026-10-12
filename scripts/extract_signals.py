@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT))
 
 from lib import gemini                                                     # noqa: E402
 from lib.db import get_client                                              # noqa: E402
+from lib.textcheck import evidence_found                                    # noqa: E402
 from lib.prompts import EXTRACTION_PROMPT, SIGNAL_TYPES, STRENGTH_RUBRIC   # noqa: E402
 
 # Free tier = ~20 requests/day PER MODEL: lib/gemini.py moves to the next model when one
@@ -77,21 +78,6 @@ class Extraction(BaseModel):
 # ---------------------------------------------------------------------------
 # Checks done in code, not trusted to the model
 # ---------------------------------------------------------------------------
-def _normalise(text: str) -> str:
-    """Lowercase, unify curly quotes/dashes/spaces so a faithful copy still matches."""
-    text = text.lower()
-    for a, b in (("’", "'"), ("‘", "'"), ("“", '"'), ("”", '"'),
-                 ("–", "-"), ("—", "-"), (" ", " ")):
-        text = text.replace(a, b)
-    text = re.sub(r"\s+", " ", text)
-    # Pages that put links on their own line leave "Corporation , has": drop space before punctuation.
-    return re.sub(r" ([,.;:!?)])", r"\1", text).strip()
-
-
-def evidence_found(evidence: str, article: str) -> bool:
-    return len(evidence.split()) >= 3 and _normalise(evidence) in _normalise(article)
-
-
 def headcount_found(n: int, article: str) -> bool:
     """True if the number appears in the text as 3000, 3,000 or 3 000."""
     digits = re.sub(r"[,\s]", "", article)

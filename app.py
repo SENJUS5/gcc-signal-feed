@@ -9,18 +9,18 @@ Run:  streamlit run app.py
 """
 
 import html
-import re
 import os
 from collections import Counter
 from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
+import voyageai
 from dotenv import load_dotenv
 from supabase import create_client
 
 from lib import gemini
-from lib.ask import ask
+from lib.ask import NOT_FOUND, ask
 from lib.company_check import (CLOSED_MEANING, MEANING, closed_on, direction, find_company,
                                not_verified_note, parent_line,
                                people_lines)
@@ -109,7 +109,7 @@ div[data-testid="stMetricValue"] {font-size: 1.6rem; font-weight: 650;}
 .disclaimer {color: #8A94A6; font-size: 0.8rem; margin-top: 1.4rem;}
 /* Ask */
 .answer {font-size: 1rem; line-height: 1.6; color: #1C2430;}
-.answer p {margin: 0 0 0.5rem 0;}
+.answer ul {margin: 0; padding-left: 1.2rem;} .answer li {margin-bottom: 0.4rem;}
 .cite {display: inline-block; font-size: 0.72rem; font-weight: 700; color: #1F4E79;
     background: #E6F1FB; border-radius: 4px; padding: 0 0.3rem; margin-left: 0.15rem;
     text-decoration: none; vertical-align: 2px;}
@@ -396,8 +396,6 @@ def job_seeker_view() -> None:
                 unsafe_allow_html=True)
 
 
-CITE_RE = re.compile(r"\[(\d+)\]")
-
 EXAMPLE_QUESTIONS = [
     "Which companies are hiring in Hyderabad?",
     "Any layoffs in Bengaluru?",
@@ -421,15 +419,18 @@ def render_answer(result: dict) -> None:
     sources = {s["n"]: s for s in result["sources"]}
     with st.container(border=True):
         if result["found"]:
-            def cite(m):
-                s = sources[int(m.group(1))]
-                return f'<a class="cite" href="{esc(s["url"])}" target="_blank">{m.group(1)}</a>'
-            paras = "".join("<p>" + CITE_RE.sub(cite, esc(line)) + "</p>"
-                            for line in result["answer"].splitlines())
-            st.markdown(f'<div class="answer">{paras}</div>', unsafe_allow_html=True)
+            def chips(nums):
+                return "".join(f'<a class="cite" href="{esc(sources[n]["url"])}" target="_blank">{n}</a>'
+                               for n in nums)
+            items = "".join(f"<li>{esc(p['text'])} {chips(p['citations'])}</li>" for p in result["points"])
+            st.markdown(f'<div class="answer"><ul>{items}</ul></div>', unsafe_allow_html=True)
         else:
-            st.markdown(f'<div class="notfound">{esc(result["answer"])} The articles below were the '
+            st.markdown(f'<div class="notfound">{esc(NOT_FOUND)} The articles below were the '
                         "closest matches, but none answers this question.</div>", unsafe_allow_html=True)
+        if result["dropped"]:
+            n = len(result["dropped"])
+            st.caption(f"{n} AI statement{'s were' if n > 1 else ' was'} removed because "
+                       f"{'their sources' if n > 1 else 'its source'} didn't support {'them' if n > 1 else 'it'}.")
 
         if result["sources"]:
             label = "Sources" if result["found"] else "Closest articles searched"
@@ -467,6 +468,9 @@ def ask_view() -> None:
         except gemini.GeminiUnavailable:
             st.info("The AI has used up today's free quota. Please try again later. "
                     "The Sales view and Company Check still work.")
+        except voyageai.error.RateLimitError:
+            st.info("Lots of questions right now (the free search tier allows a few per minute). "
+                    "Please wait a minute and ask again.")
         except Exception:
             st.warning("Sorry, something went wrong while answering. Please try again in a minute.")
 

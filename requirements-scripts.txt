@@ -1,0 +1,6 @@
+# Laptop scripts (collect_news, extract_signals, embed_articles, rescore, manual_corrections).
+# Everything the website needs, plus the article fetcher's packages.
+-r requirements.txt
+requests==2.34.2
+beautifulsoup4==4.15.0
+python-dateutil==2.9.0.post0
